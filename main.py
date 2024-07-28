@@ -1,32 +1,36 @@
-import json
-from reqs import get_page
-from pprint import pprint
+from reqs import UnParse, InnerAPI
+from db import DB, ChampionshipsDB
+from reqs import InnerAPI, UnParse
 
 
-def unparse():
-    with open("response.json") as f:
-        data = json.load(f)
+class Actions:
+    def __init__(self):
+        self.inner_api = InnerAPI()
+        self.unparse = UnParse()
+        self.cdb = ChampionshipsDB()
 
-    # pprint(data["CNT"][0]["CL"][0]["E"])
-    # pprint(len(data["CNT"][0]["CL"][0]["E"][0]["StakeTypes"]))
+    def get_n_update_championships(self):
+        # championships = [
+        #     {'CL': None,'CLI': '','EC': 2,'EGN': 'FIFA.Volta','Fid': 562890,'Id': 77777777,'N': 'FIFA.Volta','SID': 0},
+        #     {'CL': None,'CLI': '','EC': 84,'EGN': 'Europe','Fid': 113,'Id': 88888888,'N': 'Европа','SID': 0},
+        #     {'CL': None,'CLI': '','EC': 84,'EGN': 'Brazil','Fid': 113,'Id': 11111111,'N': 'Европа','SID': 0},
+        # ]
+        #
+        # championships = [
+        #     {'CL': None,'CLI': '','EC': 2,'EGN': 'FIFA.Volta','Fid': 562890,'Id': 77777777,'N': 'FIFA.Volta','SID': 0},
+        #     {'CL': None,'CLI': '','EC': 84,'EGN': 'Europe','Fid': 113,'Id': 33333333,'N': 'Европа','SID': 0},
+        #     {'CL': None,'CLI': '','EC': 23,'EGN': 'Spain','Fid': 124,'Id': 99999999,'N': 'Испания','SID': 0}
+        # ]
 
-    for match in data["CNT"][0]["CL"][0]["E"]:
-        print(match["CId"], end=" ")  # id лиги
-        print(match["H2HId"], end=" ")  # айди матча (скорее всего)
-        print(match["HT"], end=" - ")  # первая команда
-        print(match["AT"], end=" ")  # вторая команда
-        print(match["D"], end=" ")  # дата и время матча
-        for strake_type in match["StakeTypes"]:
-            if strake_type["Id"] == 3:
-                stakes = strake_type["Stakes"]
-                print(stakes[0]["A"], end=" ")  # тотал 
-                print(stakes[0]["N"], end=" ")  # больше или меньше
-                print(stakes[0]["F"])  # коэф
-
-                break
-
-unparse()
+        championships = self.inner_api.get_championsips()
+        championships_list = self.unparse.championships_response(championships)
+        self.cdb.update_championships(championships_list)
 
 
 if __name__ == "__main__":
-    pass
+    actions = Actions()
+    # actions.get_n_update_championships()
+    # db = DB()
+    # page = InnerAPI.get_page(5567)
+    # parse_list = UnParse().unparse(page)
+    # db.save_few_matches(parse_list)
