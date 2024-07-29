@@ -10,6 +10,7 @@ from pprint import pprint
 from tables import (
     ChampionshipsDict,
     TournamentsDict,
+    MatchStatus,
     MatchDict,
 )
 
@@ -26,6 +27,61 @@ class UnParse:
                     CId=championship["Id"],
                     championship_name=championship["EGN"],
                     championship_name_ru=championship["N"]
+                )
+            )
+        return return_list
+
+    def tournaments_response(self, response: dict):
+        return_list = []
+
+        for tournament in response:
+            return_list.append(
+                TournamentsDict(
+                    CId=tournament["CtID"],
+                    TId=tournament["Id"],
+                    country=tournament["ECtN"],
+                    country_ru=tournament["CtN"],
+                    championship_name=tournament["ECtN"],
+                    championship_name_ru=tournament["CtN"],
+                    tournament_name=tournament["EGN"],
+                    tournament_name_ru=tournament["N"],
+                )
+            )
+        return return_list
+
+    def matches_response(self, response: dict):
+        return_list = []
+
+        for match in response["CNT"][0]["CL"][0]["E"]:
+
+            try:
+                stake_types = list(
+                        filter(lambda x: x["Id"] == 3, match["StakeTypes"])
+                )[0]["Stakes"]
+            except IndexError:
+                # Эта ошибка значит, что коэффициентов ставок нет и это скорее 
+                # всего запись об итогах "Бразилия. Серия B. Итоги"
+                break
+
+
+            total = stake_types[0]["A"]  # тотал 
+            is_more = True if stake_types[0]["N"] == "Больше" else False  # больше или меньше
+            coefficient = stake_types[0]["F"]  # коэф
+
+            return_list.append(
+                MatchDict(
+                    TId=match["CId"],
+                    match_id = match["Id"],  # айди матча (скорее всего)
+                    match_datetime = datetime.strptime(
+                                match["D"], "%Y-%m-%dT%H:%M:%SZ"
+                        ) + timedelta(hours=3),  # Дата и время матча
+                    parse_datetime = datetime.now(),
+                    status=MatchStatus.PREMATCH.value,
+                    first_club = match["EHT"],  # первая команда
+                    first_club_ru = match["HT"],   # первая команда
+                    second_club = match["EAT"],   # вторая команда
+                    second_club_ru = match["AT"],  # вторая команда
+                    coefficients=[total, is_more, coefficient]
                 )
             )
         return return_list
@@ -152,8 +208,12 @@ class InnerAPI:
                 'partnerId': 3000091,
         }
 
-        r = requests.get("https://sport.pm.by/980bb12b-3630-4bb5-b920-68a557da9e06/prematch/matches", 
-                         params=params, 
-                         headers=self.headers)
+        try:
+            r = requests.get("https://sport.pm.by/980bb12b-3630-4bb5-b920-68a557da9e06/prematch/matches", 
+                             params=params, 
+                             headers=self.headers)
+            reqs_log.debug(f'"{r.url}" ({r.status_code})')
+        except Exception as e:
+            reqs_log.debug(f'"{r.url}" ({r.status_code}) {e}')
         return json.loads(r.text)
 

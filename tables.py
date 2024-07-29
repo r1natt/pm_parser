@@ -3,13 +3,11 @@ from datetime import datetime
 from enum import Enum
 from typing import TypedDict
 from sqlalchemy import (
-    Boolean,
     DateTime,
-    Float,
     Integer,
     String,
-    ARRAY,
-    JSON
+    JSON,
+    ForeignKey
 )
 from engine import engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -24,10 +22,10 @@ class ChampionshipsDict(TypedDict):
 class TournamentsDict(TypedDict):
     CId: str
     TId: str
-    country: str
-    country_ru: str
     championship_name: str
     championship_name_ru: str
+    tournament_name: str
+    tournament_name_ru: str
 
 class MatchStatus(Enum):
     PREMATCH = "Prematch"
@@ -35,7 +33,8 @@ class MatchStatus(Enum):
     ENDED = "Ended"
 
 class MatchDict(TypedDict):
-    league_id: int
+    CId: int
+    TId: int
     match_id: int
     match_datetime: datetime
     parse_datetime: datetime
@@ -44,9 +43,7 @@ class MatchDict(TypedDict):
     first_club_ru: str
     second_club: str
     second_club_ru: str
-    total_coef: float
-    is_more: bool
-    coefficient: float
+    coefficients: dict
 
 class Base(DeclarativeBase):
     pass
@@ -76,10 +73,10 @@ class TournamentsTable(Base):
     __tablename__ = "tournaments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    CId: Mapped[int] = mapped_column(Integer())
-    TId: Mapped[int] = mapped_column(Integer())
-    championships_name: Mapped[str] = mapped_column(String(30))
-    championships_name_ru: Mapped[str] = mapped_column(String(30))
+    CId: Mapped[int] = mapped_column(ForeignKey("championships.CId"))
+    TId: Mapped[int] = mapped_column(Integer(), unique=True)
+    championship_name: Mapped[str] = mapped_column(String(30))
+    championship_name_ru: Mapped[str] = mapped_column(String(30))
     tournament_name: Mapped[str] = mapped_column(String(50))
     tournament_name_ru: Mapped[str] = mapped_column(String(50))
 
@@ -90,9 +87,9 @@ class MatchesTable(Base):
     __tablename__ = "matches"
     
     id: Mapped[int] = mapped_column(primary_key=True)
-    CId: Mapped[int] = mapped_column(Integer())
-    TId: Mapped[int] = mapped_column(Integer())
-    match_id: Mapped[int] = mapped_column(Integer())
+    CId: Mapped[int] = mapped_column(ForeignKey("championships.CId"))
+    TId: Mapped[int] = mapped_column(ForeignKey("tournaments.TId"))
+    match_id: Mapped[int] = mapped_column(Integer(), unique=True)
     match_datetime: Mapped[datetime] = mapped_column(DateTime())
     parse_datetime: Mapped[datetime] = mapped_column(DateTime())
     status: Mapped[str] = mapped_column(String(15))
@@ -108,19 +105,3 @@ class MatchesTable(Base):
 
 Base.metadata.create_all(engine)
 
-
-
-with engine.connect() as conn:
-    stmt = insert(MatchesTable).values(
-        CId=1,
-        TId=1,
-        match_id=1,
-        status="PREMATCH",
-        first_club="asd",
-        first_club_ru="asd",
-        second_club="asd",
-        second_club_ru="asd",
-        coefficients={"asd":["asd"]}
-    )
-    conn.execute(stmt)
-    conn.commit()

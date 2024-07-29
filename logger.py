@@ -1,38 +1,45 @@
 import logging
+import requests
 from colorlog import ColoredFormatter
 
 STREAM_LOG_LEVEL = logging.INFO
 FILE_LOG_LEVEL = logging.DEBUG
 
-LOGFORMAT = "%(log_color)s[%(levelname)s] %(asctime)s %(name)s %(filename)s:%(lineno)s %(funcName)s() - %(message)s%(reset)s"
+LOGFORMAT = "%(log_color)s[%(levelname)s] %(asctime)s %(filename)s:%(funcName)s():(%(lineno)s) - %(message)s%(reset)s"
 logger_formatter = ColoredFormatter(
         LOGFORMAT,
         log_colors={
             'DEBUG': 'white',
             # INFO имеет белый цвет по умолчанию
-		    'WARNING': 'yellow',
-		    'ERROR': 'red',
-		    'CRITICAL': 'red,bg_white',
-	    })
+            'WARNING': 'yellow',
+            'ERROR': 'red',
+            'CRITICAL': 'red,bg_white',
+        })
 
 streamh = logging.StreamHandler()
 streamh.setLevel(STREAM_LOG_LEVEL)
 streamh.setFormatter(logger_formatter)
 
-fileh = logging.FileHandler("./logs/smpp.log")
+fileh = logging.FileHandler("./logs/general.log")
 fileh.setLevel(FILE_LOG_LEVEL)
 fileh.setFormatter(logger_formatter)
 
-logger = logging.getLogger("smpp")
-logger.setLevel(logging.DEBUG)
-logger.addHandler(fileh)
-logger.addHandler(streamh)
+general_log = logging.getLogger("general")
+general_log.setLevel(logging.DEBUG)
+general_log.addHandler(fileh)
+general_log.addHandler(streamh)
 
-api_fileh = logging.FileHandler("./logs/reqs.log")
-api_fileh.setLevel(FILE_LOG_LEVEL)
-api_fileh.setFormatter(logger_formatter)
+fileh = logging.FileHandler("./logs/reqs.log")
+fileh.setLevel(FILE_LOG_LEVEL)
+fileh.setFormatter(logger_formatter)
 
-api_logger = logging.getLogger("API")
-api_logger.setLevel(logging.DEBUG)
-api_logger.addHandler(api_fileh)
-api_logger.addHandler(streamh)
+reqs_log = logging.getLogger("reqs")
+reqs_log.setLevel(logging.DEBUG)
+reqs_log.addHandler(fileh)
+reqs_log.addHandler(streamh)
+
+# logger.debug("test")
+# logger.info("test")
+# logger.warning("test")
+# logger.error("test")
+# logger.critical("test")
