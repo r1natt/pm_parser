@@ -1,12 +1,15 @@
-from reqs import UnParse, InnerAPI
-from db import (
-    ChampionshipsDB,
-    TournamentsDB,
-    MatchesDB
-)
-from reqs import InnerAPI, UnParse
-from pprint import pprint
 import json
+import time
+from datetime import datetime, timedelta
+from math import floor
+from multiprocessing import Process
+from pprint import pprint
+from random import random
+
+from db import ChampionshipsDB, LiveDB, MatchesDB, TournamentsDB
+from google_sheets import GoogleSheets
+from logger import general_log
+from reqs import InnerAPI, UnParse
 
 
 class Actions:
@@ -16,6 +19,7 @@ class Actions:
         self.cdb = ChampionshipsDB()
         self.tdb = TournamentsDB()
         self.mdb = MatchesDB()
+        self.ldb = LiveDB()
 
     def get_n_update_championships(self):
         # championships = [
@@ -34,34 +38,98 @@ class Actions:
         championships_list = self.unparse.championships_response(championships)
         self.cdb.update_championships(championships_list)
 
-    def get_n_update_tournaments(self, CId: int):
-
-        tournaments = self.inner_api.get_tournaments(1309)
-        tournaments_list = self.unparse.tournaments_response(tournaments)
+    def get_n_update_tournaments(self, c_id: int):
+        tournaments = self.inner_api.get_tournaments(c_id)
+        tournaments_list = self.unparse.tournaments(tournaments)
         self.tdb.save_new_tournametns(tournaments_list)
+        return tournaments_list
 
-    def get_n_update_matches(self, TId: int):
-        
-        # matches = self.inner_api.get_mathces(TId)
-        with open("response.json") as file:
-            matches = json.load(file)
-        
+    def get_n_update_matches(self, t_id: int):
+        matches = self.inner_api.get_mathces(t_id)
         matches_list = self.unparse.matches_response(matches)
         self.mdb.save_n_update_matches(matches_list)
+        return matches_list
+
+    def get_n_update_live(self):
+        live_matches = self.inner_api.get_live_matches()
+        live_list = self.unparse.live(live_matches)
+        
+        self.ldb.handle_live_matches(live_list)
+
+        # for match in live_list:
+        #     if match["status"] == "Перерыв":
+        #         pprint(match)
+        # update_status
+        # check_on_break
+
 
 
 class Cycle:
     def __init__(self):
-        pass
+        self.acts = Actions()
+        self.gs = GoogleSheets()
+
+        self.manager = Process(target=self.manager)
+
+        self.last_live_update = datetime.now() - timedelta(seconds=10)
+        self.gs.update_matches()
+
+    def live(self):
+        if not(datetime.now() - timedelta(seconds=1) <= self.last_live_update <= datetime.now() + timedelta(seconds=1)):
+            self.last_live_update = datetime.now()
+            general_log.info("start parsing live")
+            
+            self.acts.get_n_update_live()
+            time.sleep(random() * 1 + 1)
+
+    def matches(self):
+        general_log.info("Start parsing matches")
+
+        self.acts.get_n_update_championships()
+        time.sleep(random() * 1 + 1)
+
+        t = time.time()
+
+        c_ids = [1222, 1224, 1292, 2688, 1441, 2276]
+        exclude_t_ids = [42317, 42320, 42337, 42322, 46314, 42331, 42324, 42335, 42334, 42327, 42330, 47817, 42318, 46313]
+
+        t_ids = []
+        for c_id in c_ids:
+            t_list = self.acts.get_n_update_tournaments(c_id)
+            for tournament in t_list:
+                t_ids.append([tournament["id"], tournament["matches_count"]])
+            time.sleep(random() * 1 + 1)
+        # Сделать так, чтобы мы не запрашивали нулевые турнаменты
+
+        print(t_ids)
+        for t_id, matches_count in t_ids:
+            if t_id not in exclude_t_ids:
+                if matches_count != 0:
+                    tm = time.time()
+                    matches_list = self.acts.get_n_update_matches(t_id)
+                    general_log.debug(f"Parse match {t_id} | Parsed {len(matches_list)} | Time: {round(time.time() - tm, 2)}c")
+                    time.sleep(random() * 1 + 1)
+
+        self.gs.update_matches()
+        general_log.info(f"Parsed {len(t_ids)} tournaments | Time: {round(time.time() - t, 2)}c")
+
+    def manager(self):
+        while True:
+            if 0 <= round(time.time() % 300) <= 2:
+                if floor(time.time() % 10) == 0:
+                    self.live()
+                self.matches()
+            elif floor(time.time() % 10) == 0:
+                self.live()
+            time.sleep(0.5)
 
 
 if __name__ == "__main__":
-    actions = Actions()
+    # actions = Actions()
     # actions.get_n_update_championships()
-    # actions.get_n_update_tournaments(1309)
-    actions.get_n_update_matches(5567)
+    # actions.get_n_update_tournaments(1295)
+    # actions.get_n_update_matches(4535)
+    # actions.get_n_update_live()
 
-    # db = DB()
-    # page = InnerAPI.get_page(5567)
-    # parse_list = UnParse().unparse(page)
-    # db.save_few_matches(parse_list)
+    cycle = Cycle()
+    cycle.manager.start()

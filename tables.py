@@ -10,35 +10,45 @@ from sqlalchemy import (
     ForeignKey
 )
 from engine import engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import insert
 
 
 class ChampionshipsDict(TypedDict):
-    CId: int
-    championship_name: str
-    championship_name_ru: str
+    id: int
+    name: str
+    name_ru: str
 
 class TournamentsDict(TypedDict):
-    CId: str
-    TId: str
-    championship_name: str
-    championship_name_ru: str
-    tournament_name: str
-    tournament_name_ru: str
+    id: str
+    c_id: str
+    name: str
+    name_ru: str
+
+    matches_count: int
 
 class MatchStatus(Enum):
     PREMATCH = "Prematch"
     LIVE = "Live"
-    ENDED = "Ended"
+    PASSED = "Passed"
 
 class MatchDict(TypedDict):
-    CId: int
-    TId: int
-    match_id: int
+    id: int
+    c_id: int
+    t_id: int
     match_datetime: datetime
     parse_datetime: datetime
     status: MatchStatus
+    first_club: str
+    first_club_ru: str
+    second_club: str
+    second_club_ru: str
+    coefficients: dict
+
+class LiveMatchDict(TypedDict):
+    id: int
+    status: str
+    match_datetime: datetime
     first_club: str
     first_club_ru: str
     second_club: str
@@ -59,9 +69,12 @@ class ChampionshipsTable(Base):
     __tablename__ = "championships"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    CId: Mapped[int] = mapped_column(Integer(), unique=True)
-    championship_name = mapped_column(String(50))
-    championship_name_ru = mapped_column(String(50))
+
+    tournaments: Mapped[list["TournamentsTable"]] = relationship("TournamentsTable", back_populates="championship")
+    matches: Mapped[list["MatchesTable"]] = relationship("MatchesTable", back_populates="championship")
+    
+    name = mapped_column(String(100))
+    name_ru = mapped_column(String(100))
 
 
 class TournamentsTable(Base):
@@ -73,12 +86,13 @@ class TournamentsTable(Base):
     __tablename__ = "tournaments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    CId: Mapped[int] = mapped_column(ForeignKey("championships.CId"))
-    TId: Mapped[int] = mapped_column(Integer(), unique=True)
-    championship_name: Mapped[str] = mapped_column(String(30))
-    championship_name_ru: Mapped[str] = mapped_column(String(30))
-    tournament_name: Mapped[str] = mapped_column(String(50))
-    tournament_name_ru: Mapped[str] = mapped_column(String(50))
+    c_id: Mapped[int] = mapped_column(ForeignKey("championships.id"))
+
+    championship: Mapped["ChampionshipsTable"] = relationship("ChampionshipsTable", back_populates="tournaments")
+    matches: Mapped[list["MatchesTable"]] = relationship("MatchesTable", back_populates="tournament")
+
+    name: Mapped[str] = mapped_column(String(100))
+    name_ru: Mapped[str] = mapped_column(String(100))
 
     def __repr__(self) -> str:
         return f"League(id={self.id!r}, CId={self.CId!r}, country={self.coutry_ru!r}, league_name={self.league_name_ru!r})"
@@ -87,16 +101,20 @@ class MatchesTable(Base):
     __tablename__ = "matches"
     
     id: Mapped[int] = mapped_column(primary_key=True)
-    CId: Mapped[int] = mapped_column(ForeignKey("championships.CId"))
-    TId: Mapped[int] = mapped_column(ForeignKey("tournaments.TId"))
-    match_id: Mapped[int] = mapped_column(Integer(), unique=True)
+    c_id: Mapped[int] = mapped_column(ForeignKey("championships.id"))
+    t_id: Mapped[int] = mapped_column(ForeignKey("tournaments.id"))
+
+    championship: Mapped[ChampionshipsTable] = relationship(ChampionshipsTable, back_populates="matches")
+    tournament: Mapped[TournamentsTable] = relationship(TournamentsTable, back_populates="matches")
+
     match_datetime: Mapped[datetime] = mapped_column(DateTime())
     parse_datetime: Mapped[datetime] = mapped_column(DateTime())
+    last_live_parse_datetime: Mapped[datetime] = mapped_column(DateTime())
     status: Mapped[str] = mapped_column(String(15))
-    first_club: Mapped[str] = mapped_column(String(50))
-    first_club_ru: Mapped[str] = mapped_column(String(50))
-    second_club: Mapped[str] = mapped_column(String(50))
-    second_club_ru: Mapped[str] = mapped_column(String(50))
+    first_club: Mapped[str] = mapped_column(String(100))
+    first_club_ru: Mapped[str] = mapped_column(String(100))
+    second_club: Mapped[str] = mapped_column(String(100))
+    second_club_ru: Mapped[str] = mapped_column(String(100))
     coefficients: Mapped[float] = mapped_column(JSON)
 
     def __repr__(self) -> str:

@@ -3,8 +3,9 @@ from enum import Enum
 
 from requests import Session
 from pprint import pprint
-from sqlalchemy import insert, select, update, delete
-
+from logger import general_log, reqs_log
+from sqlalchemy import insert, select, update, delete, or_
+import traceback
 from engine import engine
 from tables import (
     Base, 
@@ -60,226 +61,111 @@ class DB:
 
 
 class ChampionshipsDB:
-    def __init__(self):
-        pass
-
-    def get_saved_championships(self):
-        return_list = []
-
+    def is_championship_in_db(self, c_id, name):
         with engine.connect() as conn:
-            stmt = select(ChampionshipsTable)
-            championships = conn.execute(stmt).all()
-
-            for championship in championships:
-                return_list.append(
-                    ChampionshipsDict(
-                        CId=championship[1],
-                        championship_name=championship[2],
-                        championship_name_ru=championship[3]
+            stmt = (select(ChampionshipsTable).
+                    where(ChampionshipsTable.id == c_id)
                     )
-                )
-            return return_list
+            result = conn.execute(stmt).all()
+            if len(result) != 0:
+                result = result[0]
+                if result[1] == name:
+                    return True if len(result) != 0 else False
+                else:
+                    return "updated"
+            else:
+                return False
 
-    def championship_difference_new(self, saved_championships_names, championships_response_names):
-        # new_championships - если появились новые чемпионаты, я получаю их список
-        new_championships = list(championships_response_names.difference(saved_championships_names))
-        return new_championships
-
-    def championship_difference_updated(self, 
-                                        saved_championships,
-                                        saved_championships_names,
-                                        championships_response,
-                                        championships_response_names):
-        updated_id_championships = []
-        championships_intersection = list(saved_championships_names.intersection(championships_response_names))
-
-        saved_championships = {
-                championship["championship_name"]: championship["CId"] 
-                for championship in saved_championships
-        }
-
-        championships_response = {
-                championship["championship_name"]: championship["CId"]
-                for championship in championships_response
-        }
-
-        for championship_name in championships_intersection:
-            id_saved_championships = saved_championships[championship_name]
-            id_championships_response = championships_response[championship_name]
-            if id_saved_championships != id_championships_response:
-                updated_id_championships.append(championship_name)
-
-        return updated_id_championships
-
-    def championship_difference_deleted(self, saved_championships_names, championships_response_names):
-        # new_championships - если появились новые чемпионаты, я получаю их список
-        deleted_championships = list(saved_championships_names.difference(championships_response_names))
-        return deleted_championships
-
-    def championships_difference(self, 
-                                 saved_championships: list[ChampionshipsDict],
-                                 championships_response: list[ChampionshipsDict]):
-        saved_championships_names = set(
-                [championship["championship_name"] for championship in saved_championships]
-        )
-
-        championships_response_names = set(
-                [championship["championship_name"] for championship in championships_response]
-        )
-
-        new_championships_names = self.championship_difference_new(
-                saved_championships_names, 
-                championships_response_names)
-        
-        updated_id_championships = self.championship_difference_updated(
-                saved_championships,
-                saved_championships_names,
-                championships_response,
-                championships_response_names)
-
-        deleted_championships_names = self.championship_difference_deleted(
-                saved_championships_names, 
-                championships_response_names)
-
-        return {"new": new_championships_names,
-                "updated": updated_id_championships,
-                "deleted": deleted_championships_names}
-
-    def insert(self, championship_dict: ChampionshipsDict):
-        with engine.connect() as conn:
-            stmt = insert(ChampionshipsTable).values(
-                CId=championship_dict["CId"],
-                championship_name=championship_dict["championship_name"],
-                championship_name_ru=championship_dict["championship_name_ru"]
-            )
-            conn.execute(stmt)
-            conn.commit()
-
-    def save_new_championships(self, new_names_list, championships_response):
+    def update_championships(self, championships_response):
         for championship in championships_response:
-            if championship["championship_name"] in new_names_list:
-                self.insert(championship)
-
-    def update_championships_ids(self, update_names_list, championships_response):
-        championships_response = {
-                championship["championship_name"]: championship["CId"]
-                for championship in championships_response
-        }
-
-        for update_name in update_names_list:
-            with engine.connect() as conn:
-                stmt = (
-                    update(ChampionshipsTable).
-                    where(ChampionshipsTable.championship_name == update_name).
-                    values(CId=championships_response[update_name])
-                )
-                conn.execute(stmt)
-                conn.commit()
-
-    def delete_championships(self, delete_names_list):
-        for championship in delete_names_list:
-            with engine.connect() as conn:
-                stmt = (
-                    delete(ChampionshipsTable).
-                    where(ChampionshipsTable.championship_name==championship)
-                )
-                conn.execute(stmt)
-                conn.commit()
-
-    def update_championships(self, championships_response: list[ChampionshipsDict]):
-        saved_championships = self.get_saved_championships()
-
-        championships_difference = self.championships_difference(
-                saved_championships,
-                championships_response)
-
-        print(championships_difference)
-        
-        self.save_new_championships(
-                championships_difference["new"], 
-                championships_response
-        )
-        self.update_championships_ids(
-                championships_difference["updated"],
-                championships_response
-        )
-        self.delete_championships(championships_difference["deleted"])
-
-        # with engine.connect() as conn:
-        #     stmt = insert(ChampionshipsTable).values(
-        #         CId=
-        #     )
-        
-
-        # with engine.connect() as conn:
-        #     for championship in championships_response:
-        #         stmt = insert(ChampionshipsTable).values(
-        #             CId=championship["CId"],
-        #             championship_name=championship["championship_name"],
-        #             championship_name_ru=championship["championship_name_ru"]
-        #         )
-        #         conn.execute(stmt)
-        #         conn.commit()
+            _id = championship["id"]
+            name = championship["name"]
+            name_ru = championship["name_ru"]
+            is_championship_in_db = self.is_championship_in_db(_id, name)
+            if is_championship_in_db == "updated":
+                with engine.connect() as conn:
+                    stmt = (update(ChampionshipsTable).
+                            where(ChampionshipsTable.id == _id).
+                            values(name=name, name_ru=name_ru)
+                            )
+                    conn.execute(stmt)
+                    conn.commit()
+            elif not(is_championship_in_db):
+                with engine.connect() as conn:
+                    stmt = (insert(ChampionshipsTable).
+                            values(
+                                id=championship["id"],
+                                name=championship["name"],
+                                name_ru=championship["name_ru"]
+                                )
+                            )
+                    conn.execute(stmt)
+                    conn.commit()
+            else:
+                pass
 
 
 class TournamentsDB:
-    def _is_tournament_in_db(self, tournament_name, TId, CId):
+    def _is_tournament_in_db(self, name):
         with engine.connect() as conn:
             stmt = (select(TournamentsTable).
-                    where(TournamentsTable.tournament_name == tournament_name)
+                    where(TournamentsTable.name == name)
                     )
             result = conn.execute(stmt).all()
             return True if len(result) != 0 else False
 
+    def get_t_ids_by_c_ids(self, c_ids: list):
+        with engine.connect() as conn:
+            stmt = (select(TournamentsTable.id).
+                    where(TournamentsTable.c_id.in_(c_ids))
+                    )
+            result = [_id[0] for _id in conn.execute(stmt).all()]
+            return result
+
     def save_new_tournametns(self, tournaments_response: list[TournamentsDict]):
         for tournament in tournaments_response:
             with engine.connect() as conn:
-                if not self._is_tournament_in_db(tournament["tournament_name"],
-                                                 tournament["TId"],
-                                                 tournament["CId"]):
+                if not self._is_tournament_in_db(tournament["name"]):
 
                     stmt = insert(TournamentsTable).values(
-                        CId=tournament["CId"],
-                        TId=tournament["TId"],
-                        championship_name=tournament["championship_name"],
-                        championship_name_ru=tournament["championship_name_ru"],
-                        tournament_name=tournament["tournament_name"],
-                        tournament_name_ru=tournament["tournament_name_ru"]
+                        id=tournament["id"],
+                        c_id=tournament["c_id"],
+                        name=tournament["name"],
+                        name_ru=tournament["name_ru"]
                     )
                     conn.execute(stmt)
                     conn.commit()
 
 
 class MatchesDB:
-    def get_existing_match(self, match_id):
+    def get_existing_match(self, _id):
         with engine.connect() as conn:
             stmt = (select(MatchesTable).
-                    where(MatchesTable.match_id==match_id).
-                    where(MatchesTable.status==MatchStatus.PREMATCH.value)
+                    where(MatchesTable.id==_id)
                     )
             return conn.execute(stmt).all()
 
-    def get_cid_by_tid(self, TId):
+    def get_cid_by_tid(self, t_id):
         with engine.connect() as conn:
-            stmt = (select(TournamentsTable.CId).
-                    where(TournamentsTable.TId == TId)
+            stmt = (select(TournamentsTable.c_id).
+                    where(TournamentsTable.id == t_id)
                     )
             return conn.execute(stmt).first()[0]
 
-    def _is_match_in_db(self, match_id, ):
-        return True if len(self.get_existing_match(match_id,)) != 0 else False
+    def _is_match_in_db(self, _id):
+        return True if len(self.get_existing_match(_id)) != 0 else False
 
-    def save_new_coefficient(self, match_id, coefs):
+    def save_new_coefficient(self, _id, coefs):
         with engine.connect() as conn:
             stmt = (update(MatchesTable).
-                    where(MatchesTable.match_id == match_id).
+                    where(MatchesTable.id == _id).
                     values(coefficients = coefs)
                     )
             conn.execute(stmt)
             conn.commit()
 
     def update_existing_match(self, match):
-        td15m = timedelta(minutes=15)
+        approach = timedelta(minutes=3)
 
         td2d = timedelta(days=2)
         td1d = timedelta(days=1)
@@ -289,51 +175,53 @@ class MatchesDB:
 
         mdt = match["match_datetime"]
     
-        existing_match_coefs = self.get_existing_match(match["match_id"])[0][-1]
-        parsing_coefs = {
-                "total": match["coefficients"][0],
-                "is_more": match["coefficients"][1],
-                "coefficient": match["coefficients"][2]
+        existing_match_coefs = self.get_existing_match(match["id"])[0][-1]
+        # parsing_coefs = {
+        #         "total": match["coefficients"][0],
+        #         "is_more": match["coefficients"][1],
+        #         "coefficient": match["coefficients"][2],
+        #         "timestamp": datetime.timestamp(datetime.now())
+        # }
+        coefficients = {
+            "coefficients": match["coefficients"],
+            "timestamp": datetime.timestamp(datetime.now())
         }
+
         if mdt - td2d > datetime.now():
             if "open" not in existing_match_coefs.keys():
                 coef_key = "open"
-                print("Меньше 2х дней")
             else:
                 coef_key = -1
-        elif (mdt - td2d - td15m) <= datetime.now() <= (mdt - td2d - td15m):
+        elif (mdt - td2d - approach) <= datetime.now() <= (mdt - td2d + approach):
             coef_key = "2d"
-            print("2 дня")
-        elif (mdt - td1d - td15m) <= datetime.now() <= (mdt - td1d - td15m):
+        elif (mdt - td1d - approach) <= datetime.now() <= (mdt - td1d + approach):
             coef_key = "1d"
-            print("1 день")
-        elif (mdt - td3h - td15m) <= datetime.now() <= (mdt - td3h - td15m):
+        elif (mdt - td3h - approach) <= datetime.now() <= (mdt - td3h + approach):
             coef_key = "3h"
-            print("3 часа")
-        elif (mdt - td50m - td15m) <= datetime.now() <= (mdt - td50m - td15m):
+        elif (mdt - td50m - approach) <= datetime.now() <= (mdt - td50m + approach):
             coef_key = "50m"
-            print("50 минут")
-        elif (mdt - td5m - td15m) <= datetime.now() <= (mdt - td5m - td15m):
+        elif (mdt - td5m - approach) <= datetime.now() <= (mdt - td5m + approach):
             coef_key = "5m"
-            print("5 минут")
         else:
             coef_key = -1
-            print('не попало в интервалы')
 
         if coef_key != -1:
-            existing_match_coefs[coef_key] = parsing_coefs
-            self.save_new_coefficient(match["match_id"], existing_match_coefs)
-    
+            if coef_key not in existing_match_coefs.keys():
+                existing_match_coefs["prematch"][coef_key] = coefficients
+
+                general_log.debug(f"Update coefs: {match["id"]} {existing_match_coefs}")
+                self.save_new_coefficient(match["id"], existing_match_coefs)
+
     def save_n_update_matches(self, matches_response):
         for match in matches_response:
             with engine.connect() as conn:
-                if not self._is_match_in_db(match["match_id"]):
-                    CId = self.get_cid_by_tid(match["TId"])
-                    print(CId)
+                if not self._is_match_in_db(match["id"]):
+
+                    c_id = self.get_cid_by_tid(match["t_id"])
                     stmt = insert(MatchesTable).values(
-                        CId=CId,
-                        TId=match["TId"],
-                        match_id=match["match_id"],
+                        id=match["id"],
+                        c_id=c_id,
+                        t_id=match["t_id"],
                         match_datetime=match["match_datetime"],
                         parse_datetime=match["parse_datetime"],
                         status=match["status"],
@@ -341,7 +229,7 @@ class MatchesDB:
                         first_club_ru=match["first_club_ru"],
                         second_club=match["second_club"],
                         second_club_ru=match["second_club_ru"],
-                        coefficients={}
+                        coefficients={"prematch": {}, "live": {}}
                     )
                     """
                     В самом объекте MatchDict есть коэффициенты в coefficients,
@@ -355,59 +243,152 @@ class MatchesDB:
                     conn.execute(stmt)
                     conn.commit()
 
-                    self.update_existing_match(match)
-                else:
-                    self.update_existing_match(match)
+                self.update_existing_match(match)
+                # self.change_status_passed_matches()
+
+
+class LiveDB:
+    def get_match_status_by_id(self, _id):
+        try:
+            with engine.connect() as conn:
+                stmt = (select(MatchesTable.status).
+                        where(MatchesTable.id == _id)
+                        )
+                return conn.execute(stmt).first()
+        except Exception:
+            general_log.error(traceback.format_exc())
+
+    def is_match_in_db(self, _id):
+        with engine.connect() as conn:
+            stmt = (select(MatchesTable).
+                    where(MatchesTable.id == _id))
+            return True if len(conn.execute(stmt).all()) != 0 else False
+
+    def update_status_to_live(self, _id):
+        try:
+            with engine.connect() as conn:
+                stmt = (update(MatchesTable).
+                        where(MatchesTable.id == _id).
+                        values(status = MatchStatus.LIVE.value)
+                        )
+                conn.execute(stmt)
+                conn.commit()
+        except Exception:
+            general_log.error(traceback.format_exc())
+
+    def update_statuses_to_passed(self, _ids):
+        with engine.connect() as conn:
+            stmt = (update(MatchesTable).
+                    where(MatchesTable.id.not_in(_ids)).
+                    where(MatchesTable.match_datetime < datetime.now()).
+                    values(status = MatchStatus.PASSED.value))
+            conn.execute(stmt)
+            conn.commit()
+
+    def get_last_parse_datetime_n_coefs(self, _id):
+        with engine.connect() as conn:
+            stmt = (select(MatchesTable.last_live_parse_datetime, MatchesTable.coefficients).
+                    where(MatchesTable.id == _id))
+            return conn.execute(stmt).first()
+
+    def save_live_coefs(self, coefs, _id):
+        with engine.connect() as conn:
+            stmt = (update(MatchesTable).
+                    where(MatchesTable.id == _id).
+                    values(last_live_parse_datetime = datetime.now(),
+                           coefficients=coefs)
+                    )
+            conn.execute(stmt)
+            conn.commit()
+        
+    def check_for_break(self, match):
+        try:
+            if match["status"] == "Перерыв":
+                tdelta5m = timedelta(minutes=5)
+                tdelta10m = timedelta(minutes=10)
+                tdelta15m = timedelta(minutes=15)
+                tdelta10s = timedelta(seconds=10)
+
+                coefficients = {
+                    "coefficients": match["coefficients"],
+                    "timestamp": datetime.timestamp(datetime.now())
+                }
+
+                last_update_datetime, coefs = self.get_last_parse_datetime_n_coefs(match["id"])
+                coef_key = ''
+                if "open" not in coefs["live"]:
+                    coef_key = "open"
+                elif "5m" not in coefs["live"]:
+                    if last_update_datetime + tdelta5m - tdelta10s <= datetime.now(): # <= last_update_datetime + tdelta5m - tdelta10s:
+                        coef_key = "5m"
+                elif "10m" not in coefs["live"]:
+                    if last_update_datetime + tdelta10m - tdelta10s <= datetime.now(): # <= last_update_datetime + tdelta10m - tdelta10s:
+                        coef_key = "10m"
+                elif "15m" not in coefs["live"]:
+                    if last_update_datetime + tdelta15m - tdelta10s <= datetime.now(): # <= last_update_datetime + tdelta15m - tdelta10s:
+                        coef_key = "15m"
+
+                if coef_key != '':
+                    coefs["live"][coef_key] = coefficients
+                    self.save_live_coefs(coefs, match["id"])
+                    reqs_log.debug(f"Коэффициенты {match["id"]} в перерыве {coef_key}: {coefs["live"]}")
+        except Exception:
+            reqs_log.error(traceback.format_exc())
+
+    def handle_live_matches(self, live_list):
+        for live_match in live_list:
+            _id = live_match["id"]
+
+            status_in_db = self.get_match_status_by_id(_id)
+            if status_in_db is not None:
+                print(_id, live_match["status"], status_in_db[0])
+            else:
+                pass
+                # print(_id, -1)
+            if self.is_match_in_db(_id):
+                self.check_for_break(live_match)
+
+            if live_match["status"] != "Событие не началось":
+                self.update_status_to_live(_id)
+
+        _ids = [live_match["id"] for live_match in live_list]
+        self.update_statuses_to_passed(_ids)
 
 
 class GSDB:
-    def get_saved_championships(self):
-        return_dict = {}
-
+    def get_matches(self):
         with engine.connect() as conn:
-            stmt = select(ChampionshipsTable)
-            championships_in_db = conn.execute(stmt).all()
-            for championship in championships_in_db:
-                return_dict[championship[1]] = championship[3]
-        return return_dict
-
-    def get_saved_tournaments(self):
-        return_dict = {}
-
-    def format_data(self, matches):
-        championships = self.get_saved_championships()
-        print(championships)
-
-        for match in matches:
-            id = match[0]
-            CId = match[1]
-            TId = match[2]
-            match_id = match[3]
-            match_datetime = match[4]
-            parse_datetime = match[5]
-            status = match[6]
-            first_club = match[7]
-            first_club_ru = match[8]
-            second_club = match[9]
-            second_club_ru = match[10]
-            coefficients = match[11]
-
-
-
-
-
-    def select_matches(self):
-        with engine.connect() as conn:
-            stmt = (select(MatchesTable).
-                    join(ChampionshipsTable.championship_name_ru))
-            print(stmt)
-
-            # stmt = (select(MatchesTable.).
-            #         where(MatchesTable.status == MatchStatus.PREMATCH.value))
+            stmt = (
+                select(
+                    MatchesTable.id,
+                    MatchesTable.t_id,
+                    MatchesTable.c_id,
+                    ChampionshipsTable.name_ru,
+                    TournamentsTable.name_ru,
+                    MatchesTable.first_club_ru,
+                    MatchesTable.second_club_ru,
+                    MatchesTable.match_datetime,
+                    MatchesTable.coefficients,
+                    MatchesTable.status
+                ).
+                where(
+                    or_(
+                        MatchesTable.status == MatchStatus.PREMATCH.value, 
+                        MatchesTable.status == MatchStatus.LIVE.value
+                        )
+                    ).
+                join(
+                    TournamentsTable,
+                    MatchesTable.t_id == TournamentsTable.id
+                ).
+                join(
+                    ChampionshipsTable, 
+                    MatchesTable.c_id == ChampionshipsTable.id
+                ).
+                order_by(
+                    MatchesTable.match_datetime.asc(),
+                    MatchesTable.status.asc()         
+                )
+            )
             return conn.execute(stmt).all()
 
-    def get_matches(self):
-        matches = self.select_matches()
-
-gsdb = GSDB()
-pprint(gsdb.select_matches())
