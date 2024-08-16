@@ -5,6 +5,7 @@ from requests import Session
 from pprint import pprint
 from logger import general_log, reqs_log
 from sqlalchemy import insert, select, update, delete, or_
+from sqlalchemy.orm import sessionmaker
 import traceback
 from engine import engine
 from tables import (
@@ -20,6 +21,7 @@ from tables import (
 )
 Base.metadata.create_all(engine)
 
+Session = sessionmaker(engine)
 
 class DB:
     def __init__(self):
@@ -63,109 +65,167 @@ class DB:
 class ChampionshipsDB:
     def is_championship_in_db(self, c_id, name):
         with engine.connect() as conn:
-            stmt = (select(ChampionshipsTable).
-                    where(ChampionshipsTable.id == c_id)
-                    )
-            result = conn.execute(stmt).all()
-            if len(result) != 0:
-                result = result[0]
-                if result[1] == name:
-                    return True if len(result) != 0 else False
+            with conn.begin():
+                stmt = (select(ChampionshipsTable).
+                        where(ChampionshipsTable.id == c_id)
+                        )
+                result = conn.execute(stmt).all()
+                if len(result) != 0:
+                    result = result[0]
+                    if result[1] == name:
+                        return True if len(result) != 0 else False
+                    else:
+                        return "updated"
                 else:
-                    return "updated"
-            else:
-                return False
+                    return False
+
+    def update_active_status(self, ids):
+        with engine.connect() as conn:
+            with conn.begin():
+                stmt = (update(ChampionshipsTable).
+                        where(ChampionshipsTable.id.not_in(ids)).
+                        values(is_active=False)
+                        )
+                conn.execute(stmt)
+                stmt = (update(ChampionshipsTable).
+                        where(ChampionshipsTable.id.in_(ids)).
+                        values(is_active=True)
+                        )
+                conn.execute(stmt)
+                conn.commit()
 
     def update_championships(self, championships_response):
+        ids = [championship["id"] for championship in championships_response]
+
         for championship in championships_response:
             _id = championship["id"]
             name = championship["name"]
             name_ru = championship["name_ru"]
+
             is_championship_in_db = self.is_championship_in_db(_id, name)
             if is_championship_in_db == "updated":
                 with engine.connect() as conn:
-                    stmt = (update(ChampionshipsTable).
-                            where(ChampionshipsTable.id == _id).
-                            values(name=name, name_ru=name_ru)
-                            )
-                    conn.execute(stmt)
-                    conn.commit()
+                    with conn.begin():
+                        stmt = (update(ChampionshipsTable).
+                                where(ChampionshipsTable.id == _id).
+                                values(name=name, name_ru=name_ru)
+                                )
+                        conn.execute(stmt)
+                        conn.commit()
             elif not(is_championship_in_db):
                 with engine.connect() as conn:
-                    stmt = (insert(ChampionshipsTable).
-                            values(
-                                id=championship["id"],
-                                name=championship["name"],
-                                name_ru=championship["name_ru"]
+                    with conn.begin():
+                        stmt = (insert(ChampionshipsTable).
+                                values(
+                                    id=championship["id"],
+                                    name=championship["name"],
+                                    name_ru=championship["name_ru"]
+                                    )
                                 )
-                            )
-                    conn.execute(stmt)
-                    conn.commit()
+                        conn.execute(stmt)
+                        conn.commit()
             else:
                 pass
+        self.update_active_status(ids)
+
+    def get_championship_ids_from_db(self):
+        with engine.connect() as conn:
+            with conn.begin():
+                stmt = (select(ChampionshipsTable.id).
+                        where(ChampionshipsTable.is_active == True)
+                        )
+                return [_id[0] for _id in conn.execute(stmt).all()]
 
 
 class TournamentsDB:
     def _is_tournament_in_db(self, name):
         with engine.connect() as conn:
-            stmt = (select(TournamentsTable).
-                    where(TournamentsTable.name == name)
-                    )
-            result = conn.execute(stmt).all()
-            return True if len(result) != 0 else False
+            with conn.begin():
+                stmt = (select(TournamentsTable).
+                        where(TournamentsTable.name == name)
+                        )
+                result = conn.execute(stmt).all()
+                return True if len(result) != 0 else False
 
     def get_t_ids_by_c_ids(self, c_ids: list):
         with engine.connect() as conn:
-            stmt = (select(TournamentsTable.id).
-                    where(TournamentsTable.c_id.in_(c_ids))
-                    )
-            result = [_id[0] for _id in conn.execute(stmt).all()]
-            return result
+            with conn.begin():
+                stmt = (select(TournamentsTable.id).
+                        where(TournamentsTable.c_id.in_(c_ids))
+                        )
+                result = [_id[0] for _id in conn.execute(stmt).all()]
+                return result
 
     def save_new_tournametns(self, tournaments_response: list[TournamentsDict]):
         for tournament in tournaments_response:
             with engine.connect() as conn:
-                if not self._is_tournament_in_db(tournament["name"]):
-
-                    stmt = insert(TournamentsTable).values(
-                        id=tournament["id"],
-                        c_id=tournament["c_id"],
-                        name=tournament["name"],
-                        name_ru=tournament["name_ru"]
-                    )
-                    conn.execute(stmt)
-                    conn.commit()
+                with conn.begin():
+                    if not self._is_tournament_in_db(tournament["name"]):
+                        stmt = insert(TournamentsTable).values(
+                            id=tournament["id"],
+                            c_id=tournament["c_id"],
+                            name=tournament["name"],
+                            name_ru=tournament["name_ru"]
+                        )
+                        conn.execute(stmt)
+                        conn.commit()
 
 
 class MatchesDB:
+    def _get_matches_ids_in_td(self, period_td):
+        td20s = timedelta(seconds=20)
+        with engine.connect() as conn:
+            with conn.begin():
+                stmt = (select(MatchesTable.id).
+                        filter(period_td - td20s + datetime.now() <= MatchesTable.match_datetime).
+                        filter(MatchesTable.match_datetime <= period_td + td20s + datetime.now())
+                        )
+                return [i[0] for i in conn.execute(stmt).all()]
+
+    def get_matches_before_periods(self):
+        periods = {"2d": timedelta(days=2),
+                   "1d": timedelta(days=1),
+                   "3h": timedelta(hours=3),
+                   "50m": timedelta(minutes=50),
+                   "5m": timedelta(minutes=5)}
+        matches_by_periods = {}
+        for period_name, period_td in periods.items():
+            print(period_name, period_td)
+            matches_by_periods[period_name] = self._get_matches_ids_in_td(period_td)
+        print(matches_by_periods)
+
     def get_existing_match(self, _id):
         with engine.connect() as conn:
-            stmt = (select(MatchesTable).
-                    where(MatchesTable.id==_id)
-                    )
-            return conn.execute(stmt).all()
+            with conn.begin():
+                stmt = (select(MatchesTable).
+                        where(MatchesTable.id==_id)
+                        )
+                return conn.execute(stmt).all()
 
     def get_cid_by_tid(self, t_id):
         with engine.connect() as conn:
-            stmt = (select(TournamentsTable.c_id).
-                    where(TournamentsTable.id == t_id)
-                    )
-            return conn.execute(stmt).first()[0]
+            with conn.begin():
+                stmt = (select(TournamentsTable.c_id).
+                        where(TournamentsTable.id == t_id)
+                        )
+                return conn.execute(stmt).first()[0]
 
     def _is_match_in_db(self, _id):
         return True if len(self.get_existing_match(_id)) != 0 else False
 
     def save_new_coefficient(self, _id, coefs):
         with engine.connect() as conn:
-            stmt = (update(MatchesTable).
-                    where(MatchesTable.id == _id).
-                    values(coefficients = coefs)
-                    )
-            conn.execute(stmt)
-            conn.commit()
+            with conn.begin():
+                stmt = (update(MatchesTable).
+                        where(MatchesTable.id == _id).
+                        values(coefficients = coefs)
+                        )
+                conn.execute(stmt)
+                conn.commit()
 
     def update_existing_match(self, match):
-        approach = timedelta(minutes=3)
+        approach_down = timedelta(minutes=2, seconds=30)
+        approach_up = timedelta(minutes=2, seconds=30)
 
         td2d = timedelta(days=2)
         td1d = timedelta(days=1)
@@ -192,15 +252,15 @@ class MatchesDB:
                 coef_key = "open"
             else:
                 coef_key = -1
-        elif (mdt - td2d - approach) <= datetime.now() <= (mdt - td2d + approach):
+        elif (mdt - td2d - approach_down) <= datetime.now() <= (mdt - td2d + approach_up):
             coef_key = "2d"
-        elif (mdt - td1d - approach) <= datetime.now() <= (mdt - td1d + approach):
+        elif (mdt - td1d - approach_down) <= datetime.now() <= (mdt - td1d + approach_up):
             coef_key = "1d"
-        elif (mdt - td3h - approach) <= datetime.now() <= (mdt - td3h + approach):
+        elif (mdt - td3h - approach_down) <= datetime.now() <= (mdt - td3h + approach_up):
             coef_key = "3h"
-        elif (mdt - td50m - approach) <= datetime.now() <= (mdt - td50m + approach):
+        elif (mdt - td50m - approach_down) <= datetime.now() <= (mdt - td50m + approach_up):
             coef_key = "50m"
-        elif (mdt - td5m - approach) <= datetime.now() <= (mdt - td5m + approach):
+        elif (mdt - td5m - approach_down) <= datetime.now() <= (mdt - td5m + approach_up):
             coef_key = "5m"
         else:
             coef_key = -1
@@ -215,91 +275,98 @@ class MatchesDB:
     def save_n_update_matches(self, matches_response):
         for match in matches_response:
             with engine.connect() as conn:
-                if not self._is_match_in_db(match["id"]):
+                with conn.begin():
+                    if not self._is_match_in_db(match["id"]):
 
-                    c_id = self.get_cid_by_tid(match["t_id"])
-                    stmt = insert(MatchesTable).values(
-                        id=match["id"],
-                        c_id=c_id,
-                        t_id=match["t_id"],
-                        match_datetime=match["match_datetime"],
-                        parse_datetime=match["parse_datetime"],
-                        status=match["status"],
-                        first_club=match["first_club"],
-                        first_club_ru=match["first_club_ru"],
-                        second_club=match["second_club"],
-                        second_club_ru=match["second_club_ru"],
-                        coefficients={"prematch": {}, "live": {}}
-                    )
-                    """
-                    В самом объекте MatchDict есть коэффициенты в coefficients,
-                    Но они пока не соответствуют формату, 
-                    
-                    при первом добавлении матча в бд coefficients передается 
-                    как пустой словарь, а потом я вызываю функцию 
-                    update_existing_match которая знает как управлятсья с 
-                    коэффициентами
-                    """
-                    conn.execute(stmt)
-                    conn.commit()
+                        c_id = self.get_cid_by_tid(match["t_id"])
+                        stmt = insert(MatchesTable).values(
+                            id=match["id"],
+                            c_id=c_id,
+                            t_id=match["t_id"],
+                            match_datetime=match["match_datetime"],
+                            parse_datetime=match["parse_datetime"],
+                            status=match["status"],
+                            first_club=match["first_club"],
+                            first_club_ru=match["first_club_ru"],
+                            second_club=match["second_club"],
+                            second_club_ru=match["second_club_ru"],
+                            coefficients={"prematch": {}, "live": {}}
+                        )
+                        """
+                        В самом объекте MatchDict есть коэффициенты в coefficients,
+                        Но они пока не соответствуют формату, 
+                        
+                        при первом добавлении матча в бд coefficients передается 
+                        как пустой словарь, а потом я вызываю функцию 
+                        update_existing_match которая знает как управлятсья с 
+                        коэффициентами
+                        """
+                        conn.execute(stmt)
+                        conn.commit()
 
-                self.update_existing_match(match)
-                # self.change_status_passed_matches()
+            self.update_existing_match(match)
+            # self.change_status_passed_matches()
 
 
 class LiveDB:
     def get_match_status_by_id(self, _id):
         try:
             with engine.connect() as conn:
-                stmt = (select(MatchesTable.status).
-                        where(MatchesTable.id == _id)
-                        )
-                return conn.execute(stmt).first()
+                with conn.begin():
+                    stmt = (select(MatchesTable.status).
+                            where(MatchesTable.id == _id)
+                            )
+                    return conn.execute(stmt).first()
         except Exception:
             general_log.error(traceback.format_exc())
 
     def is_match_in_db(self, _id):
         with engine.connect() as conn:
-            stmt = (select(MatchesTable).
-                    where(MatchesTable.id == _id))
-            return True if len(conn.execute(stmt).all()) != 0 else False
+            with conn.begin():
+                stmt = (select(MatchesTable).
+                        where(MatchesTable.id == _id))
+                return True if len(conn.execute(stmt).all()) != 0 else False
 
     def update_status_to_live(self, _id):
         try:
             with engine.connect() as conn:
-                stmt = (update(MatchesTable).
-                        where(MatchesTable.id == _id).
-                        values(status = MatchStatus.LIVE.value)
-                        )
-                conn.execute(stmt)
-                conn.commit()
+                with conn.begin():
+                    stmt = (update(MatchesTable).
+                            where(MatchesTable.id == _id).
+                            values(status = MatchStatus.LIVE.value)
+                            )
+                    conn.execute(stmt)
+                    conn.commit()
         except Exception:
             general_log.error(traceback.format_exc())
 
     def update_statuses_to_passed(self, _ids):
         with engine.connect() as conn:
-            stmt = (update(MatchesTable).
-                    where(MatchesTable.id.not_in(_ids)).
-                    where(MatchesTable.match_datetime < datetime.now()).
-                    values(status = MatchStatus.PASSED.value))
-            conn.execute(stmt)
-            conn.commit()
+            with conn.begin():
+                stmt = (update(MatchesTable).
+                        where(MatchesTable.id.not_in(_ids)).
+                        where(MatchesTable.match_datetime < datetime.now()).
+                        values(status = MatchStatus.PASSED.value))
+                conn.execute(stmt)
+                conn.commit()
 
     def get_last_parse_datetime_n_coefs(self, _id):
         with engine.connect() as conn:
-            stmt = (select(MatchesTable.last_live_parse_datetime, MatchesTable.coefficients).
-                    where(MatchesTable.id == _id))
-            return conn.execute(stmt).first()
+            with conn.begin():
+                stmt = (select(MatchesTable.last_live_parse_datetime, MatchesTable.coefficients).
+                        where(MatchesTable.id == _id))
+                return conn.execute(stmt).first()
 
     def save_live_coefs(self, coefs, _id):
         with engine.connect() as conn:
-            stmt = (update(MatchesTable).
-                    where(MatchesTable.id == _id).
-                    values(last_live_parse_datetime = datetime.now(),
-                           coefficients=coefs)
-                    )
-            conn.execute(stmt)
-            conn.commit()
+            with conn.begin():
+                stmt = (update(MatchesTable).
+                        where(MatchesTable.id == _id).
+                        values(last_live_parse_datetime = datetime.now(),
+                               coefficients=coefs)
+                        )
+                conn.execute(stmt)
+                conn.commit()
         
     def check_for_break(self, match):
         try:
@@ -358,37 +425,94 @@ class LiveDB:
 class GSDB:
     def get_matches(self):
         with engine.connect() as conn:
-            stmt = (
-                select(
-                    MatchesTable.id,
-                    MatchesTable.t_id,
-                    MatchesTable.c_id,
-                    ChampionshipsTable.name_ru,
-                    TournamentsTable.name_ru,
-                    MatchesTable.first_club_ru,
-                    MatchesTable.second_club_ru,
-                    MatchesTable.match_datetime,
-                    MatchesTable.coefficients,
-                    MatchesTable.status
-                ).
-                where(
-                    or_(
-                        MatchesTable.status == MatchStatus.PREMATCH.value, 
-                        MatchesTable.status == MatchStatus.LIVE.value
-                        )
+            with conn.begin():
+                stmt = (
+                    select(
+                        MatchesTable.id,
+                        MatchesTable.t_id,
+                        MatchesTable.c_id,
+                        ChampionshipsTable.name_ru,
+                        TournamentsTable.name_ru,
+                        MatchesTable.first_club_ru,
+                        MatchesTable.second_club_ru,
+                        MatchesTable.match_datetime,
+                        MatchesTable.coefficients,
+                        MatchesTable.status
                     ).
-                join(
-                    TournamentsTable,
-                    MatchesTable.t_id == TournamentsTable.id
-                ).
-                join(
-                    ChampionshipsTable, 
-                    MatchesTable.c_id == ChampionshipsTable.id
-                ).
-                order_by(
-                    MatchesTable.match_datetime.asc(),
-                    MatchesTable.status.asc()         
+                    where(
+                        or_(
+                            MatchesTable.status == MatchStatus.PREMATCH.value, 
+                            MatchesTable.status == MatchStatus.LIVE.value
+                            )
+                        ).
+                    where(
+                            MatchesTable.t_id.not_in(
+                                [42317, 42320, 42337, 42322, 46314, 42331, 42324, 
+                                 42335, 42334, 42327, 42330, 47817, 42318, 46313, 
+                                 46310]
+                            )
+                        ).
+                    join(
+                        TournamentsTable,
+                        MatchesTable.t_id == TournamentsTable.id
+                    ).
+                    join(
+                        ChampionshipsTable, 
+                        MatchesTable.c_id == ChampionshipsTable.id
+                    ).
+                    order_by(
+                        MatchesTable.match_datetime.asc(),
+                        MatchesTable.status.asc()         
+                    )
                 )
-            )
-            return conn.execute(stmt).all()
+                return conn.execute(stmt).all()
 
+    def get_passed(self):
+        with engine.connect() as conn:
+            with conn.begin():
+                stmt = (
+                    select(
+                        MatchesTable.id,
+                        MatchesTable.t_id,
+                        MatchesTable.c_id,
+                        ChampionshipsTable.name_ru,
+                        TournamentsTable.name_ru,
+                        MatchesTable.first_club_ru,
+                        MatchesTable.second_club_ru,
+                        MatchesTable.match_datetime,
+                        MatchesTable.coefficients,
+                        MatchesTable.status
+                    ).
+                    where(
+                        MatchesTable.status == MatchStatus.PASSED.value, 
+                        ).
+                    where(
+                            MatchesTable.t_id.not_in(
+                                [42317, 42320, 42337, 42322, 46314, 42331, 42324, 
+                                 42335, 42334, 42327, 42330, 47817, 42318, 46313, 
+                                 46310]
+                            )
+                        ).
+                    join(
+                        TournamentsTable,
+                        MatchesTable.t_id == TournamentsTable.id
+                    ).
+                    join(
+                        ChampionshipsTable, 
+                        MatchesTable.c_id == ChampionshipsTable.id
+                    ).
+                    order_by(
+                        MatchesTable.match_datetime.asc(),
+                        MatchesTable.status.asc()
+                    ).
+                    fetch(300)
+                )
+                return conn.execute(stmt).all()
+
+
+# with Session() as session:
+#     stmt = select(MatchesTable)
+#     print(session.execute(stmt).first())
+
+mdb = MatchesDB()
+mdb.get_matches_before_periods()

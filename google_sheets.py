@@ -47,10 +47,10 @@ class GoogleSheets:
             )
             .execute()
         )
-        general_log.debug(f"{result.get('updatedCells')} cells updated.")
+        general_log.debug(f"{result.get('updatedCells')} cells updated {range}")
         return result
    
-    def write_last_update(self):
+    def write_last_update(self, range):
         body = {"values": [[datetime.now().strftime("%d/%m %H:%M:%S")]]}
         service = build("sheets", "v4", credentials=creds)
         sheet = service.spreadsheets()
@@ -59,13 +59,13 @@ class GoogleSheets:
             .values()
             .update(
                 spreadsheetId=SAMPLE_SPREADSHEET_ID,
-                range="E1:E1",
+                range=range,
                 valueInputOption="USER_ENTERED",
                 body=body,
             )
             .execute()
         )
-        general_log.debug(f"{result.get('updatedCells')} cells updated.")
+        general_log.debug(f"{result.get('updatedCells')} cells updated {range}")
         return result
 
     def write(self, range, values):
@@ -83,7 +83,7 @@ class GoogleSheets:
             )
             .execute()
         )
-        general_log.debug(f"{result.get('updatedCells')} cells updated.")
+        general_log.debug(f"{result.get('updatedCells')} cells updated {range}")
         return result
 
     def calculate_main_coefficient(self, coefs_list):
@@ -112,10 +112,13 @@ class GoogleSheets:
                             coef[2] - totals_coefs[coef[0]]
                             ), 
                         2)
-        min_total = min(totals_coefs, key=totals_coefs.get) 
-        for coef in coefs_list:
-            if coef[0] == min_total and coef[1] is True:
-                return coef
+        try:
+            min_total = min(totals_coefs, key=totals_coefs.get) 
+            for coef in coefs_list:
+                if coef[0] == min_total and coef[1] is True:
+                    return coef
+        except ValueError:
+            return [-1, False, -1]
         return [-1, False, -1]
 
     def format_data(self, matches):
@@ -176,20 +179,31 @@ class GoogleSheets:
         return return_list
 
 
-    def update_matches(self, planned=False):
+    def update_active(self):
         """
         Иногда я обновляю гугл таблицу при запуске скрипта, и вместе с 
         обновлением таблицы я обновлял и время ее обновления, хотя это не 
         логично, ведь время обновления показывает за сколько отработал парсер
         """
-        data_range = "A3:R"
+        data_range = "Active!A3:R"
+        last_update_range = "Active!E1:E1"
 
         matches = self.gsdb.get_matches()
         format_data = self.format_data(matches)
         self.clear_range(data_range)
-        if planned:
-            self.write_last_update()
+        self.write_last_update(last_update_range)
         self.write(data_range, format_data)
+
+    def update_passed(self):
+        data_range = "Passed!A3:R"
+        last_update_range = "Passed!E1:E1"
+
+        matches = self.gsdb.get_passed()
+        format_data = self.format_data(matches)
+        self.clear_range(data_range)
+        self.write_last_update(last_update_range)
+        self.write(data_range, format_data)
+
 
 # if __name__ == "__main__":
 #     gs = GoogleSheets()
